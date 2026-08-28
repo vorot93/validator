@@ -6,7 +6,7 @@ const MIN_CONST: usize = 0;
 // Loose floating point comparison using EPSILON error bound
 macro_rules! assert_float {
     ($e1:expr, $e2:expr) => {
-        assert!(($e2 - $e1).abs() < std::f64::EPSILON);
+        assert!(($e2 - $e1).abs() < f64::EPSILON);
     };
 }
 
@@ -15,6 +15,45 @@ fn can_validate_range_ok() {
     #[derive(Debug, Validate)]
     struct TestStruct {
         #[validate(range(min = 5, max = 10))]
+        val: usize,
+    }
+
+    let s = TestStruct { val: 6 };
+
+    assert!(s.validate().is_ok());
+}
+
+#[test]
+fn can_validate_range_exclusive_min_ok() {
+    #[derive(Debug, Validate)]
+    struct TestStruct {
+        #[validate(range(exclusive_min = 5, max = 10))]
+        val: usize,
+    }
+
+    let s = TestStruct { val: 6 };
+
+    assert!(s.validate().is_ok());
+}
+
+#[test]
+fn can_validate_range_exclusive_max_ok() {
+    #[derive(Debug, Validate)]
+    struct TestStruct {
+        #[validate(range(min = 5, exclusive_max = 10))]
+        val: usize,
+    }
+
+    let s = TestStruct { val: 9 };
+
+    assert!(s.validate().is_ok());
+}
+
+#[test]
+fn can_validate_exclusive_min_and_max_ok() {
+    #[derive(Debug, Validate)]
+    struct TestStruct {
+        #[validate(range(exclusive_min = 5, exclusive_max = 10))]
         val: usize,
     }
 
@@ -50,10 +89,49 @@ fn can_validate_only_max_ok() {
 }
 
 #[test]
+fn can_validate_only_exclusive_min_ok() {
+    #[derive(Debug, Validate)]
+    struct TestStruct {
+        #[validate(range(exclusive_min = 5))]
+        val: usize,
+    }
+
+    let s = TestStruct { val: 6 };
+
+    assert!(s.validate().is_ok());
+}
+
+#[test]
+fn can_validate_only_exclusive_max_ok() {
+    #[derive(Debug, Validate)]
+    struct TestStruct {
+        #[validate(range(exclusive_max = 50))]
+        val: usize,
+    }
+
+    let s = TestStruct { val: 49 };
+
+    assert!(s.validate().is_ok());
+}
+
+#[test]
 fn can_validate_range_value_crate_path_ok() {
     #[derive(Debug, Validate)]
     struct TestStruct {
         #[validate(range(min = "MIN_CONST", max = "MAX_CONST"))]
+        val: usize,
+    }
+
+    let s = TestStruct { val: 6 };
+
+    assert!(s.validate().is_ok());
+}
+
+#[test]
+fn can_validate_exclusive_range_value_crate_path_ok() {
+    #[derive(Debug, Validate)]
+    struct TestStruct {
+        #[validate(range(exclusive_min = "MIN_CONST", max = "MAX_CONST"))]
         val: usize,
     }
 
@@ -93,7 +171,7 @@ fn value_out_of_range_fails_validation_with_crate_path() {
     let res = s.validate();
     assert!(res.is_err());
     let err = res.unwrap_err();
-    println!("{}", err);
+    println!("{err}");
     let errs = err.field_errors();
     assert!(errs.contains_key("val"));
     assert_eq!(errs["val"].len(), 1);
@@ -155,4 +233,32 @@ fn can_pass_reference_as_validate() {
     let val = TestStruct { num_field: 10 };
     validate(&val).unwrap_err();
     assert_eq!(val.num_field, 10);
+}
+
+#[test]
+fn can_validate_option() {
+    #[derive(Validate)]
+    struct TestStruct {
+        #[validate(range(min = 100))]
+        num_field: Option<u32>,
+        #[validate(range(min = 5, exclusive_max = 10))]
+        exl_field: Option<Option<u8>>,
+    }
+
+    let t = TestStruct { num_field: Some(101), exl_field: Some(Some(9)) };
+    assert!(t.validate().is_ok());
+}
+
+#[test]
+fn can_validate_none_values() {
+    #[derive(Validate)]
+    struct TestStruct {
+        #[validate(range(min = 100))]
+        num_field: Option<u32>,
+        #[validate(range(min = 5, exclusive_max = 10))]
+        exl_field: Option<Option<u8>>,
+    }
+
+    let t = TestStruct { num_field: None, exl_field: None };
+    assert!(t.validate().is_ok());
 }

@@ -5,7 +5,7 @@ use crate::{ValidationError, ValidationErrors, ValidationErrorsKind};
 impl fmt::Display for ValidationError {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(msg) = self.message.as_ref() {
-            write!(fmt, "{}", msg)
+            write!(fmt, "{msg}")
         } else {
             write!(fmt, "Validation error: {} [{:?}]", self.code, self.params)
         }
@@ -23,10 +23,10 @@ fn display_errors(
         path: &str,
     ) -> fmt::Result {
         let mut full_path = String::new();
-        write!(&mut full_path, "{}.", path)?;
+        write!(&mut full_path, "{path}.")?;
         let base_len = full_path.len();
         for (path, err) in errs.errors() {
-            write!(&mut full_path, "{}", path)?;
+            write!(&mut full_path, "{path}")?;
             display_errors(fmt, err, &full_path)?;
             full_path.truncate(base_len);
         }
@@ -35,13 +35,13 @@ fn display_errors(
 
     match errs {
         ValidationErrorsKind::Field(errs) => {
-            write!(fmt, "{}: ", path)?;
+            write!(fmt, "{path}: ")?;
             let len = errs.len();
             for (idx, err) in errs.iter().enumerate() {
                 if idx + 1 == len {
-                    write!(fmt, "{}", err)?;
+                    write!(fmt, "{err}")?;
                 } else {
-                    write!(fmt, "{}, ", err)?;
+                    write!(fmt, "{err}, ")?;
                 }
             }
             Ok(())
@@ -49,10 +49,10 @@ fn display_errors(
         ValidationErrorsKind::Struct(errs) => display_struct(fmt, errs, path),
         ValidationErrorsKind::List(errs) => {
             let mut full_path = String::new();
-            write!(&mut full_path, "{}", path)?;
+            write!(&mut full_path, "{path}")?;
             let base_len = full_path.len();
             for (idx, err) in errs.iter() {
-                write!(&mut full_path, "[{}]", idx)?;
+                write!(&mut full_path, "[{idx}]")?;
                 display_struct(fmt, err, &full_path)?;
                 full_path.truncate(base_len);
             }

@@ -1,20 +1,28 @@
 use std::borrow::Cow;
 
+#[cfg(feature = "card")]
 use card_validate::Validate as CardValidate;
 
-#[must_use]
-pub fn validate_credit_card<'a, T>(card: T) -> bool
-where
-    T: Into<Cow<'a, str>>,
-{
-    CardValidate::from(&card.into()).is_ok()
+pub trait ValidateCreditCard {
+    fn validate_credit_card(&self) -> bool {
+        let card_string = self.as_credit_card_string();
+        CardValidate::from(&card_string).is_ok()
+    }
+
+    fn as_credit_card_string(&self) -> Cow<'_, str>;
+}
+
+impl<T: AsRef<str>> ValidateCreditCard for T {
+    fn as_credit_card_string(&self) -> Cow<'_, str> {
+        Cow::from(self.as_ref())
+    }
 }
 
 #[cfg(test)]
+#[cfg(feature = "card")]
 mod tests {
+    use super::ValidateCreditCard;
     use std::borrow::Cow;
-
-    use super::validate_credit_card;
 
     #[test]
     fn test_credit_card() {
@@ -26,19 +34,19 @@ mod tests {
         ];
 
         for (input, expected) in tests {
-            assert_eq!(validate_credit_card(input), expected);
+            assert_eq!(input.validate_credit_card(), expected);
         }
     }
 
     #[test]
     fn test_credit_card_cow() {
         let test: Cow<'static, str> = "4539571147647251".into();
-        assert_eq!(validate_credit_card(test), true);
+        assert!(test.validate_credit_card());
         let test: Cow<'static, str> = String::from("4539571147647251").into();
-        assert_eq!(validate_credit_card(test), true);
+        assert!(test.validate_credit_card());
         let test: Cow<'static, str> = "5236313877109141".into();
-        assert_eq!(validate_credit_card(test), false);
+        assert!(!test.validate_credit_card());
         let test: Cow<'static, str> = String::from("5236313877109141").into();
-        assert_eq!(validate_credit_card(test), false);
+        assert!(!test.validate_credit_card());
     }
 }

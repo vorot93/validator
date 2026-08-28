@@ -1,52 +1,22 @@
 use idna::domain_to_ascii;
-use lazy_static::lazy_static;
 use regex::Regex;
-use std::borrow::Cow;
+use std::{borrow::Cow, sync::LazyLock};
 
-use crate::validation::ip::validate_ip;
+use crate::ValidateIp;
 
-lazy_static! {
-    // Regex from the specs
-    // https://html.spec.whatwg.org/multipage/forms.html#valid-e-mail-address
-    // It will mark esoteric email addresses like quoted string as invalid
-    static ref EMAIL_USER_RE: Regex = Regex::new(r"^(?i)[a-z0-9.!#$%&'*+/=?^_`{|}~-]+\z").unwrap();
-    static ref EMAIL_DOMAIN_RE: Regex = Regex::new(
-        r"(?i)^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$"
-    ).unwrap();
-    // literal form, ipv4 or ipv6 address (SMTP 4.1.3)
-    static ref EMAIL_LITERAL_RE: Regex = Regex::new(r"(?i)\[([A-f0-9:\.]+)\]\z").unwrap();
-}
-
-/// Validates whether the given string is an email based on the [HTML5 spec](https://html.spec.whatwg.org/multipage/forms.html#valid-e-mail-address).
-/// [RFC 5322](https://tools.ietf.org/html/rfc5322) is not practical in most circumstances and allows email addresses
-/// that are unfamiliar to most users.
-#[must_use]
-pub fn validate_email<'a, T>(val: T) -> bool
-where
-    T: Into<Cow<'a, str>>,
-{
-    let val = val.into();
-    if val.is_empty() || !val.contains('@') {
-        return false;
-    }
-    let parts: Vec<&str> = val.rsplitn(2, '@').collect();
-    let user_part = parts[1];
-    let domain_part = parts[0];
-
-    if !EMAIL_USER_RE.is_match(user_part) {
-        return false;
-    }
-
-    if !validate_domain_part(domain_part) {
-        // Still the possibility of an [IDN](https://en.wikipedia.org/wiki/Internationalized_domain_name)
-        return match domain_to_ascii(domain_part) {
-            Ok(d) => validate_domain_part(&d),
-            Err(_) => false,
-        };
-    }
-
-    true
-}
+// Regex from the specs
+// https://html.spec.whatwg.org/multipage/forms.html#valid-e-mail-address
+// It will mark esoteric email addresses like quoted string as invalid
+static EMAIL_USER_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+\z").unwrap());
+static EMAIL_DOMAIN_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$"
+    ).unwrap()
+});
+// literal form, ipv4 or ipv6 address (SMTP 4.1.3)
+static EMAIL_LITERAL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\[([a-fA-F0-9:\.]+)\]\z").unwrap());
 
 /// Checks if the domain is a valid domain and if not, check whether it's an IP
 #[must_use]
@@ -58,10 +28,95 @@ fn validate_domain_part(domain_part: &str) -> bool {
     // maybe we have an ip as a domain?
     match EMAIL_LITERAL_RE.captures(domain_part) {
         Some(caps) => match caps.get(1) {
-            Some(c) => validate_ip(c.as_str()),
+            Some(c) => c.as_str().validate_ip(),
             None => false,
         },
         None => false,
+    }
+}
+
+/// Validates whether the given string is an email based on the [HTML5 spec](https://html.spec.whatwg.org/multipage/forms.html#valid-e-mail-address).
+/// [RFC 5322](https://tools.ietf.org/html/rfc5322) is not practical in most circumstances and allows email addresses
+/// that are unfamiliar to most users.
+pub trait ValidateEmail {
+    fn validate_email(&self) -> bool {
+        let val = if let Some(v) = self.as_email_string() {
+            v
+        } else {
+            return true;
+        };
+
+        if val.is_empty() || !val.contains('@') {
+            return false;
+        }
+
+        let parts: Vec<&str> = val.rsplitn(2, '@').collect();
+        let user_part = parts[1];
+        let domain_part = parts[0];
+
+        // validate the length of each part of the email, BEFORE doing the regex
+        // according to RFC5321 the max length of the local part is 64 characters
+        // and the max length of the domain part is 255 characters
+        // https://datatracker.ietf.org/doc/html/rfc5321#section-4.5.3.1.1
+        if user_part.chars().count() > 64 || domain_part.chars().count() > 255 {
+            return false;
+        }
+
+        if !EMAIL_USER_RE.is_match(user_part) {
+            return false;
+        }
+
+        if !validate_domain_part(domain_part) {
+            // Still the possibility of an [IDN](https://en.wikipedia.org/wiki/Internationalized_domain_name)
+            return match domain_to_ascii(domain_part) {
+                Ok(d) => validate_domain_part(&d),
+                Err(_) => false,
+            };
+        }
+
+        true
+    }
+
+    fn as_email_string(&self) -> Option<Cow<'_, str>>;
+}
+
+impl<T> ValidateEmail for &T
+where
+    T: ValidateEmail,
+{
+    fn as_email_string(&self) -> Option<Cow<'_, str>> {
+        T::as_email_string(self)
+    }
+}
+
+impl ValidateEmail for String {
+    fn as_email_string(&self) -> Option<Cow<'_, str>> {
+        Some(Cow::from(self))
+    }
+}
+
+impl<T> ValidateEmail for Option<T>
+where
+    T: ValidateEmail,
+{
+    fn as_email_string(&self) -> Option<Cow<'_, str>> {
+        let Some(u) = self else {
+            return None;
+        };
+
+        T::as_email_string(u)
+    }
+}
+
+impl ValidateEmail for &str {
+    fn as_email_string(&self) -> Option<Cow<'_, str>> {
+        Some(Cow::from(*self))
+    }
+}
+
+impl ValidateEmail for Cow<'_, str> {
+    fn as_email_string(&self) -> Option<Cow<'_, str>> {
+        Some(self.clone())
     }
 }
 
@@ -69,7 +124,7 @@ fn validate_domain_part(domain_part: &str) -> bool {
 mod tests {
     use std::borrow::Cow;
 
-    use super::validate_email;
+    use crate::ValidateEmail;
 
     #[test]
     fn test_validate_email() {
@@ -129,10 +184,9 @@ mod tests {
         for (input, expected) in tests {
             // println!("{} - {}", input, expected);
             assert_eq!(
-                validate_email(input),
+                input.validate_email(),
                 expected,
-                "Email `{}` was not classified correctly",
-                input
+                "Email `{input}` was not classified correctly"
             );
         }
     }
@@ -140,12 +194,22 @@ mod tests {
     #[test]
     fn test_validate_email_cow() {
         let test: Cow<'static, str> = "email@here.com".into();
-        assert_eq!(validate_email(test), true);
+        assert!(test.validate_email());
         let test: Cow<'static, str> = String::from("email@here.com").into();
-        assert_eq!(validate_email(test), true);
+        assert!(test.validate_email());
         let test: Cow<'static, str> = "a@[127.0.0.1]\n".into();
-        assert_eq!(validate_email(test), false);
+        assert!(!test.validate_email());
         let test: Cow<'static, str> = String::from("a@[127.0.0.1]\n").into();
-        assert_eq!(validate_email(test), false);
+        assert!(!test.validate_email());
+    }
+
+    #[test]
+    fn test_validate_email_rfc5321() {
+        // 65 character local part
+        let test = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@mail.com";
+        assert!(!test.validate_email());
+        // 256 character domain part
+        let test = "a@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com";
+        assert!(!test.validate_email());
     }
 }

@@ -1,6 +1,5 @@
-use std::collections::HashMap;
+use std::{borrow::Cow, collections::HashMap, sync::LazyLock};
 
-use lazy_static::lazy_static;
 use regex::Regex;
 use serde::Deserialize;
 
@@ -22,30 +21,23 @@ fn validate_signup(data: &SignupData) -> Result<(), ValidationError> {
     Ok(())
 }
 
+#[allow(unused)]
 #[derive(Debug, Validate, Deserialize)]
-#[validate(schema(function = "validate_signup", skip_on_field_errors = false))]
+#[validate(schema(function = validate_signup))]
 struct SignupData {
     #[validate(email)]
     mail: String,
     #[validate(url)]
     site: String,
-    #[validate(length(min = 1), custom = "validate_unique_username")]
+    #[validate(length(min = 1), custom(function = validate_unique_username))]
     #[serde(rename = "firstName")]
     first_name: String,
     #[validate(range(min = 18, max = 20))]
     age: u32,
-    #[validate]
-    phone: Phone,
-    #[validate]
+    #[validate(nested)]
     card: Option<Card>,
-    #[validate]
+    #[validate(nested)]
     preferences: Vec<Preference>,
-}
-
-#[derive(Debug, Validate, Deserialize)]
-struct Phone {
-    #[validate(phone)]
-    number: String,
 }
 
 #[derive(Debug, Validate, Deserialize)]
@@ -71,7 +63,6 @@ fn is_fine_with_many_valid_validations() {
         site: "http://hello.com".to_string(),
         first_name: "Bob".to_string(),
         age: 18,
-        phone: Phone { number: "+14152370800".to_string() },
         card: Some(Card { number: "5236313877109142".to_string(), cvv: 123 }),
         preferences: vec![Preference { name: "marketing".to_string(), value: false }],
     };
@@ -80,86 +71,8 @@ fn is_fine_with_many_valid_validations() {
 }
 
 #[test]
-fn failed_validation_points_to_original_field_name() {
-    let signup = SignupData {
-        mail: "bob@bob.com".to_string(),
-        site: "http://hello.com".to_string(),
-        first_name: "".to_string(),
-        age: 18,
-        phone: Phone { number: "123 invalid".to_string() },
-        card: Some(Card { number: "1234567890123456".to_string(), cvv: 1 }),
-        preferences: vec![Preference { name: "abc".to_string(), value: true }],
-    };
-    let res = signup.validate();
-    // println!("{}", serde_json::to_string(&res).unwrap());
-    assert!(res.is_err());
-    let err = res.unwrap_err();
-    let errs = err.errors();
-    assert!(errs.contains_key("firstName"));
-    if let ValidationErrorsKind::Field(ref err) = errs["firstName"] {
-        assert_eq!(err.len(), 1);
-        assert_eq!(err[0].code, "length");
-    } else {
-        panic!("Expected field validation errors");
-    }
-    assert!(errs.contains_key("phone"));
-    if let ValidationErrorsKind::Struct(ref errs) = errs["phone"] {
-        unwrap_map(errs, |errs| {
-            assert_eq!(errs.len(), 1);
-            assert!(errs.contains_key("number"));
-            if let ValidationErrorsKind::Field(ref errs) = errs["number"] {
-                assert_eq!(errs.len(), 1);
-                assert_eq!(errs[0].code, "phone");
-            } else {
-                panic!("Expected field validation errors");
-            }
-        });
-    } else {
-        panic!("Expected struct validation errors");
-    }
-    assert!(errs.contains_key("card"));
-    if let ValidationErrorsKind::Struct(ref errs) = errs["card"] {
-        unwrap_map(errs, |errs| {
-            assert_eq!(errs.len(), 2);
-            assert!(errs.contains_key("number"));
-            if let ValidationErrorsKind::Field(ref err) = errs["number"] {
-                assert_eq!(err.len(), 1);
-                assert_eq!(err[0].code, "credit_card");
-            } else {
-                panic!("Expected field validation errors");
-            }
-            assert!(errs.contains_key("cvv"));
-            if let ValidationErrorsKind::Field(ref err) = errs["cvv"] {
-                assert_eq!(err.len(), 1);
-                assert_eq!(err[0].code, "range");
-            } else {
-                panic!("Expected field validation errors");
-            }
-        });
-    } else {
-        panic!("Expected struct validation errors");
-    }
-    assert!(errs.contains_key("preferences"));
-    if let ValidationErrorsKind::List(ref errs) = errs["preferences"] {
-        assert!(errs.contains_key(&0));
-        unwrap_map(&errs[&0], |errs| {
-            assert_eq!(errs.len(), 1);
-            assert!(errs.contains_key("name"));
-            if let ValidationErrorsKind::Field(ref err) = errs["name"] {
-                assert_eq!(err.len(), 1);
-                assert_eq!(err[0].code, "length");
-            }
-        });
-    } else {
-        panic!("Expected list validation errors");
-    }
-}
-
-#[test]
 fn test_can_validate_option_fields_with_lifetime() {
-    lazy_static! {
-        static ref RE2: Regex = Regex::new(r"[a-z]{2}").unwrap();
-    }
+    static RE2: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z]{2}$").unwrap());
 
     #[derive(Debug, Validate)]
     struct PutStruct<'a> {
@@ -167,23 +80,23 @@ fn test_can_validate_option_fields_with_lifetime() {
         name: Option<&'a str>,
         #[validate(length(min = 1, max = 10))]
         address: Option<Option<&'a str>>,
-        #[validate(range(min = 1, max = 100))]
+        #[validate(range(exclusive_min = 0, max = 100))]
         age: Option<Option<usize>>,
-        #[validate(range(min = 1, max = 10))]
+        #[validate(range(min = 1, exclusive_max = 10))]
         range: Option<usize>,
         #[validate(email)]
         email: Option<&'a str>,
         #[validate(url)]
         url: Option<&'a str>,
-        #[validate(contains = "@")]
+        #[validate(contains(pattern = "@"))]
         text: Option<&'a str>,
-        #[validate(regex = "RE2")]
+        #[validate(regex(path = *RE2))]
         re: Option<&'a str>,
-        #[validate(custom = "check_str")]
+        #[validate(custom(function = check_str))]
         custom: Option<&'a str>,
     }
 
-    fn check_str(_: &str) -> Result<(), ValidationError> {
+    fn check_str(_: &&str) -> Result<(), ValidationError> {
         Ok(())
     }
 
@@ -203,9 +116,7 @@ fn test_can_validate_option_fields_with_lifetime() {
 
 #[test]
 fn test_can_validate_option_fields_without_lifetime() {
-    lazy_static! {
-        static ref RE2: Regex = Regex::new(r"[a-z]{2}").unwrap();
-    }
+    static RE2: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z]{2}$").unwrap());
 
     #[derive(Debug, Validate)]
     struct PutStruct {
@@ -217,23 +128,23 @@ fn test_can_validate_option_fields_without_lifetime() {
         ids: Option<Vec<usize>>,
         #[validate(length(min = 1, max = 10))]
         opt_ids: Option<Option<Vec<usize>>>,
-        #[validate(range(min = 1, max = 100))]
+        #[validate(range(exclusive_min = 0, max = 100))]
         age: Option<Option<usize>>,
-        #[validate(range(min = 1, max = 10))]
+        #[validate(range(min = 1, exclusive_max = 10))]
         range: Option<usize>,
         #[validate(email)]
         email: Option<String>,
         #[validate(url)]
         url: Option<String>,
-        #[validate(contains = "@")]
+        #[validate(contains(pattern = "@"))]
         text: Option<String>,
-        #[validate(regex = "RE2")]
+        #[validate(regex(path = *RE2))]
         re: Option<String>,
-        #[validate(custom = "check_str")]
+        #[validate(custom(function = check_str))]
         custom: Option<String>,
     }
 
-    fn check_str(_: &str) -> Result<(), ValidationError> {
+    fn check_str(_: &String) -> Result<(), ValidationError> {
         Ok(())
     }
 
@@ -255,13 +166,16 @@ fn test_can_validate_option_fields_without_lifetime() {
 
 #[test]
 fn test_works_with_question_mark_operator() {
+    fn _check_str(_: &String) -> Result<(), ValidationError> {
+        Ok(())
+    }
+
     fn some_fn() -> Result<(), ValidationErrors> {
         let signup = SignupData {
             mail: "invalid_email".to_string(),
             site: "http://hello.com".to_string(),
             first_name: "Bob".to_string(),
             age: 18,
-            phone: Phone { number: "+14152370800".to_string() },
             card: None,
             preferences: Vec::new(),
         };
@@ -281,9 +195,9 @@ fn test_works_with_none_values() {
         name: Option<String>,
         #[validate(length(min = 1, max = 10))]
         address: Option<Option<String>>,
-        #[validate(range(min = 1, max = 100))]
+        #[validate(range(exclusive_min = 0, max = 100))]
         age: Option<Option<usize>>,
-        #[validate(range(min = 1, max = 10))]
+        #[validate(range(min = 1, exclusive_max = 10))]
         range: Option<usize>,
     }
 
@@ -295,9 +209,10 @@ fn test_works_with_none_values() {
     assert!(q.validate().is_ok());
 }
 
+#[allow(dead_code)]
 fn unwrap_map<F>(errors: &ValidationErrors, f: F)
 where
-    F: FnOnce(HashMap<&'static str, ValidationErrorsKind>),
+    F: FnOnce(HashMap<Cow<'static, str>, ValidationErrorsKind>),
 {
     let errors = errors.clone();
     f(errors.errors().clone());

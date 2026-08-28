@@ -1,16 +1,21 @@
-use lazy_static::lazy_static;
+use std::cell::OnceCell;
+use std::sync::{LazyLock, Mutex, OnceLock};
+
 use regex::Regex;
 use validator::Validate;
 
-lazy_static! {
-    static ref RE2: Regex = Regex::new(r"^[a-z]{2}$").unwrap();
-}
+static RE2: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z]{2}$").unwrap());
+
+static REGEX_ONCE_LOCK: OnceLock<Regex> = OnceLock::new();
+static REGEX_MUTEX_ONCE_CELL: Mutex<OnceCell<Regex>> = Mutex::new(OnceCell::new());
+static REGEX_MUTEX_ONCE_LOCK: Mutex<OnceLock<Regex>> = Mutex::new(OnceLock::new());
+static REGEX_LAZY_LOCK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z]{2}$").unwrap());
 
 #[test]
 fn can_validate_valid_regex() {
     #[derive(Debug, Validate)]
     struct TestStruct {
-        #[validate(regex = "crate::RE2")]
+        #[validate(regex(path = *crate::RE2))]
         val: String,
     }
 
@@ -23,7 +28,7 @@ fn can_validate_valid_regex() {
 fn bad_value_for_regex_fails_validation() {
     #[derive(Debug, Validate)]
     struct TestStruct {
-        #[validate(regex = "crate::RE2")]
+        #[validate(regex(path = *crate::RE2))]
         val: String,
     }
 
@@ -42,7 +47,7 @@ fn bad_value_for_regex_fails_validation() {
 fn can_specify_code_for_regex() {
     #[derive(Debug, Validate)]
     struct TestStruct {
-        #[validate(regex(path = "crate::RE2", code = "oops"))]
+        #[validate(regex(path = *crate::RE2, code = "oops"))]
         val: String,
     }
     let s = TestStruct { val: "2".to_string() };
@@ -59,7 +64,7 @@ fn can_specify_code_for_regex() {
 fn can_specify_message_for_regex() {
     #[derive(Debug, Validate)]
     struct TestStruct {
-        #[validate(regex(path = "crate::RE2", message = "oops"))]
+        #[validate(regex(path = *crate::RE2, message = "oops"))]
         val: String,
     }
     let s = TestStruct { val: "2".to_string() };
@@ -70,4 +75,67 @@ fn can_specify_message_for_regex() {
     assert!(errs.contains_key("val"));
     assert_eq!(errs["val"].len(), 1);
     assert_eq!(errs["val"][0].clone().message.unwrap(), "oops");
+}
+
+#[test]
+fn can_specify_once_lock_for_regex() {
+    #[derive(Debug, Validate)]
+    struct TestStruct {
+        #[validate(regex(path = crate::REGEX_ONCE_LOCK))]
+        val: String,
+    }
+
+    let _ = REGEX_ONCE_LOCK.set(Regex::new(r"^[a-z]{2}$").unwrap());
+    let t = TestStruct { val: "aa".to_string() };
+    assert!(t.validate().is_ok());
+
+    let t = TestStruct { val: "aaa".to_string() };
+    assert!(t.validate().is_err());
+}
+
+#[test]
+fn can_specify_mutex_once_cell_for_regex() {
+    #[derive(Debug, Validate)]
+    struct TestStruct {
+        #[validate(regex(path = crate::REGEX_MUTEX_ONCE_CELL))]
+        val: String,
+    }
+
+    let _ = REGEX_MUTEX_ONCE_CELL.lock().unwrap().set(Regex::new(r"^[a-z]{2}$").unwrap());
+    let t = TestStruct { val: "aa".to_string() };
+    assert!(t.validate().is_ok());
+
+    let t = TestStruct { val: "aaa".to_string() };
+    assert!(t.validate().is_err());
+}
+
+#[test]
+fn can_specify_mutex_once_lock_for_regex() {
+    #[derive(Debug, Validate)]
+    struct TestStruct {
+        #[validate(regex(path = crate::REGEX_MUTEX_ONCE_LOCK))]
+        val: String,
+    }
+
+    let _ = REGEX_MUTEX_ONCE_LOCK.lock().unwrap().set(Regex::new(r"^[a-z]{2}$").unwrap());
+    let t = TestStruct { val: "aa".to_string() };
+    assert!(t.validate().is_ok());
+
+    let t = TestStruct { val: "aaa".to_string() };
+    assert!(t.validate().is_err());
+}
+
+#[test]
+fn can_specify_lazy_lock_for_regex() {
+    #[derive(Debug, Validate)]
+    struct TestStruct {
+        #[validate(regex(path = crate::REGEX_LAZY_LOCK))]
+        val: String,
+    }
+
+    let t = TestStruct { val: "aa".to_string() };
+    assert!(t.validate().is_ok());
+
+    let t = TestStruct { val: "aaa".to_string() };
+    assert!(t.validate().is_err());
 }

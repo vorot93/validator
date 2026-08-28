@@ -1,5 +1,57 @@
 ## Changelog
 
+## 0.21.0 (2026/07/09)
+
+- Replace dep proc-macro-error2 with proc-macro-error3
+- Edition 2024
+
+## 0.20.0 (2025/01/20)
+
+- Implement `AsRegex` for `std::sync::LazyLock<Regex>`
+- Bug fix for nested issue with custom only running nested if outer passes
+- Support `Deserialize` for `ValidationErrors`
+
+## 0.19.0 (2024/11/03)
+
+- Swap to using proc-macro-error-2 instead of proc-macro-error for Syn
+- Bumped MSRV to 1.81 because of error naming changes.
+- Add more ValidateRegex impl
+
+
+## 0.18.1 (2024/04/11)
+
+- Fix multiple custom validation
+- Fix nested error handling
+
+
+## 0.18.0 (2024/04/05)
+
+- Fix regressions from the derive rewrite, some things are back to 0.16 (eg custom functions)
+- Remove require_nested, use required and nested validators instead
+- Always require `nested` on the field for nested validation
+
+
+## 0.17.0 (2024/03/04)
+
+- Derive macro has been entirely rewritten
+- Validation is now done through traits that you can implement
+- Remove phone validator
+- Remove automatic use of serde rename for fields name (temporary)
+
+## 0.16.0 (2022/06/27)
+
+- Allow passing code/message to `required`
+- Add `does_not_contain` validator
+- Check email length before validating it
+
+## 0.15.0 (2022/05/03)
+
+- Allow passing args to schema validator
+- Implement HasLen for map/set types
+- Remove `validator_types` from validator crate
+- Add ValidationErrors::errors_mut
+- Ignore unsupported fields rather than erroring
+
 ## 0.14.0 (2021/06/29)
 
 - Allow passing arguments to custom functions

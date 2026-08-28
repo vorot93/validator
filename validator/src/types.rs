@@ -20,6 +20,13 @@ impl ValidationError {
     pub fn add_param<T: Serialize>(&mut self, name: Cow<'static, str>, val: &T) {
         self.params.insert(name, to_value(val).unwrap());
     }
+
+    /// Adds a custom message to a `ValidationError` that will be used when displaying the
+    /// `ValidationError`, instead of an auto-generated description.
+    pub fn with_message(mut self, message: Cow<'static, str>) -> ValidationError {
+        self.message = Some(message);
+        self
+    }
 }
 
 impl std::error::Error for ValidationError {
@@ -31,7 +38,7 @@ impl std::error::Error for ValidationError {
     }
 }
 
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum ValidationErrorsKind {
     Struct(Box<ValidationErrors>),
@@ -39,8 +46,8 @@ pub enum ValidationErrorsKind {
     Field(Vec<ValidationError>),
 }
 
-#[derive(Default, Debug, Serialize, Clone, PartialEq)]
-pub struct ValidationErrors(HashMap<&'static str, ValidationErrorsKind>);
+#[derive(Default, Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct ValidationErrors(pub HashMap<Cow<'static, str>, ValidationErrorsKind>);
 
 impl ValidationErrors {
     pub fn new() -> ValidationErrors {
@@ -55,6 +62,28 @@ impl ValidationErrors {
         match result {
             Ok(()) => false,
             Err(ref errs) => errs.contains_key(field),
+        }
+    }
+
+    pub fn merge_self(
+        &mut self,
+        field: &'static str,
+        child: Result<(), ValidationErrors>,
+    ) -> &mut ValidationErrors {
+        match child {
+            Ok(()) => self,
+            Err(mut errors) => {
+                // This is a bit of a hack to be able to support collections which return a
+                // `ValidationErrors` with a made-up `_tmp_validator` entry which we need to strip
+                // off.
+                if let Some(collection) = errors.0.remove("_tmp_validator") {
+                    self.add_nested(field, collection);
+                } else {
+                    self.add_nested(field, ValidationErrorsKind::Struct(Box::new(errors)));
+                }
+
+                self
+            }
         }
     }
 
@@ -105,22 +134,28 @@ impl ValidationErrors {
 
     /// Returns a map of field-level validation errors found for the struct that was validated and
     /// any of it's nested structs that are tagged for validation.
-    pub fn errors(&self) -> &HashMap<&'static str, ValidationErrorsKind> {
+    pub fn errors(&self) -> &HashMap<Cow<'static, str>, ValidationErrorsKind> {
         &self.0
     }
 
+    /// Returns a mutable map of field-level validation errors found for the struct that was validated and
+    /// any of it's nested structs that are tagged for validation.
+    pub fn errors_mut(&mut self) -> &mut HashMap<Cow<'static, str>, ValidationErrorsKind> {
+        &mut self.0
+    }
+
     /// Consume the struct, returning the validation errors found
-    pub fn into_errors(self) -> HashMap<&'static str, ValidationErrorsKind> {
+    pub fn into_errors(self) -> HashMap<Cow<'static, str>, ValidationErrorsKind> {
         self.0
     }
 
     /// Returns a map of only field-level validation errors found for the struct that was validated.
-    pub fn field_errors(&self) -> HashMap<&'static str, &Vec<ValidationError>> {
+    pub fn field_errors(&self) -> HashMap<Cow<'static, str>, &Vec<ValidationError>> {
         self.0
             .iter()
             .filter_map(|(k, v)| {
                 if let ValidationErrorsKind::Field(errors) = v {
-                    Some((*k, errors))
+                    Some((k.clone(), errors))
                 } else {
                     None
                 }
@@ -129,8 +164,10 @@ impl ValidationErrors {
     }
 
     pub fn add(&mut self, field: &'static str, error: ValidationError) {
-        if let ValidationErrorsKind::Field(ref mut vec) =
-            self.0.entry(field).or_insert_with(|| ValidationErrorsKind::Field(vec![]))
+        if let ValidationErrorsKind::Field(ref mut vec) = self
+            .0
+            .entry(Cow::Borrowed(field))
+            .or_insert_with(|| ValidationErrorsKind::Field(vec![]))
         {
             vec.push(error);
         } else {
@@ -144,7 +181,7 @@ impl ValidationErrors {
     }
 
     fn add_nested(&mut self, field: &'static str, errors: ValidationErrorsKind) {
-        if let Vacant(entry) = self.0.entry(field) {
+        if let Vacant(entry) = self.0.entry(Cow::Borrowed(field)) {
             entry.insert(errors);
         } else {
             panic!("Attempt to replace non-empty ValidationErrors entry");

@@ -1,173 +1,7 @@
+use crate::types::{ValidationErrors, ValidationErrorsKind};
 use std::borrow::Cow;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-
-#[cfg(feature = "indexmap")]
-use indexmap::{IndexMap, IndexSet};
-
-use crate::types::ValidationErrors;
-
-/// Trait to implement if one wants to make the `length` validator
-/// work for more types
-///
-/// A bit sad it's not there by default in Rust
-pub trait HasLen {
-    fn length(&self) -> u64;
-}
-
-impl HasLen for String {
-    fn length(&self) -> u64 {
-        self.chars().count() as u64
-    }
-}
-
-impl<'a> HasLen for &'a String {
-    fn length(&self) -> u64 {
-        self.chars().count() as u64
-    }
-}
-
-impl<'a> HasLen for &'a str {
-    fn length(&self) -> u64 {
-        self.chars().count() as u64
-    }
-}
-
-impl<'a> HasLen for Cow<'a, str> {
-    fn length(&self) -> u64 {
-        self.len() as u64
-    }
-}
-
-impl<T> HasLen for Vec<T> {
-    fn length(&self) -> u64 {
-        self.len() as u64
-    }
-}
-
-impl<'a, T> HasLen for &'a Vec<T> {
-    fn length(&self) -> u64 {
-        self.len() as u64
-    }
-}
-
-impl<'a, K, V> HasLen for &'a HashMap<K, V> {
-    fn length(&self) -> u64 {
-        self.len() as u64
-    }
-}
-
-impl<K, V> HasLen for HashMap<K, V> {
-    fn length(&self) -> u64 {
-        self.len() as u64
-    }
-}
-
-impl<'a, T> HasLen for &'a HashSet<T> {
-    fn length(&self) -> u64 {
-        self.len() as u64
-    }
-}
-
-impl<T> HasLen for HashSet<T> {
-    fn length(&self) -> u64 {
-        self.len() as u64
-    }
-}
-
-impl<'a, K, V> HasLen for &'a BTreeMap<K, V> {
-    fn length(&self) -> u64 {
-        self.len() as u64
-    }
-}
-
-impl<K, V> HasLen for BTreeMap<K, V> {
-    fn length(&self) -> u64 {
-        self.len() as u64
-    }
-}
-
-impl<'a, T> HasLen for &'a BTreeSet<T> {
-    fn length(&self) -> u64 {
-        self.len() as u64
-    }
-}
-
-impl<T> HasLen for BTreeSet<T> {
-    fn length(&self) -> u64 {
-        self.len() as u64
-    }
-}
-
-#[cfg(feature = "indexmap")]
-impl<'a, K, V> HasLen for &'a IndexMap<K, V> {
-    fn length(&self) -> u64 {
-        self.len() as u64
-    }
-}
-
-#[cfg(feature = "indexmap")]
-impl<K, V> HasLen for IndexMap<K, V> {
-    fn length(&self) -> u64 {
-        self.len() as u64
-    }
-}
-
-#[cfg(feature = "indexmap")]
-impl<'a, T> HasLen for &'a IndexSet<T> {
-    fn length(&self) -> u64 {
-        self.len() as u64
-    }
-}
-
-#[cfg(feature = "indexmap")]
-impl<T> HasLen for IndexSet<T> {
-    fn length(&self) -> u64 {
-        self.len() as u64
-    }
-}
-
-/// Trait to implement if one wants to make the `contains` validator
-/// work for more types
-pub trait Contains {
-    #[must_use]
-    fn has_element(&self, needle: &str) -> bool;
-}
-
-impl Contains for String {
-    fn has_element(&self, needle: &str) -> bool {
-        self.contains(needle)
-    }
-}
-
-impl<'a> Contains for &'a String {
-    fn has_element(&self, needle: &str) -> bool {
-        self.contains(needle)
-    }
-}
-
-impl<'a> Contains for &'a str {
-    fn has_element(&self, needle: &str) -> bool {
-        self.contains(needle)
-    }
-}
-
-impl<'a> Contains for Cow<'a, str> {
-    fn has_element(&self, needle: &str) -> bool {
-        self.contains(needle)
-    }
-}
-
-impl<S, H: ::std::hash::BuildHasher> Contains for HashMap<String, S, H> {
-    fn has_element(&self, needle: &str) -> bool {
-        self.contains_key(needle)
-    }
-}
-
-impl<'a, S, H: ::std::hash::BuildHasher> Contains for &'a HashMap<String, S, H> {
-    fn has_element(&self, needle: &str) -> bool {
-        self.contains_key(needle)
-    }
-}
+use std::collections::btree_map::BTreeMap;
+use std::collections::HashMap;
 
 /// This is the original trait that was implemented by deriving `Validate`. It will still be
 /// implemented for struct validations that don't take custom arguments. The call is being
@@ -178,7 +12,107 @@ pub trait Validate {
 
 impl<T: Validate> Validate for &T {
     fn validate(&self) -> Result<(), ValidationErrors> {
-        T::validate(*self)
+        T::validate(self)
+    }
+}
+
+macro_rules! impl_validate_list {
+    ($container:ty) => {
+        impl<T: Validate> Validate for $container {
+            fn validate(&self) -> Result<(), ValidationErrors> {
+                let mut vec_err: BTreeMap<usize, Box<ValidationErrors>> = BTreeMap::new();
+
+                for (index, item) in self.iter().enumerate() {
+                    if let Err(e) = item.validate() {
+                        vec_err.insert(index, Box::new(e));
+                    }
+                }
+
+                if vec_err.is_empty() {
+                    Ok(())
+                } else {
+                    let err_kind = ValidationErrorsKind::List(vec_err);
+                    let errors = ValidationErrors(std::collections::HashMap::from([(
+                        Cow::Borrowed("_tmp_validator"),
+                        err_kind,
+                    )]));
+                    Err(errors)
+                }
+            }
+        }
+    };
+}
+
+impl_validate_list!(std::collections::HashSet<T>);
+impl_validate_list!(std::collections::BTreeSet<T>);
+impl_validate_list!(std::collections::BinaryHeap<T>);
+impl_validate_list!(std::collections::LinkedList<T>);
+impl_validate_list!(std::collections::VecDeque<T>);
+impl_validate_list!(std::vec::Vec<T>);
+impl_validate_list!([T]);
+
+impl<T: Validate, const N: usize> Validate for [T; N] {
+    fn validate(&self) -> Result<(), ValidationErrors> {
+        let mut vec_err: BTreeMap<usize, Box<ValidationErrors>> = BTreeMap::new();
+
+        for (index, item) in self.iter().enumerate() {
+            if let Err(e) = item.validate() {
+                vec_err.insert(index, Box::new(e));
+            }
+        }
+
+        if vec_err.is_empty() {
+            Ok(())
+        } else {
+            let err_kind = ValidationErrorsKind::List(vec_err);
+            let errors = ValidationErrors(std::collections::HashMap::from([(
+                Cow::Borrowed("_tmp_validator"),
+                err_kind,
+            )]));
+            Err(errors)
+        }
+    }
+}
+
+impl<K, V: Validate, S> Validate for &HashMap<K, V, S> {
+    fn validate(&self) -> Result<(), ValidationErrors> {
+        let mut vec_err: BTreeMap<usize, Box<ValidationErrors>> = BTreeMap::new();
+
+        for (index, (_key, value)) in self.iter().enumerate() {
+            if let Err(e) = value.validate() {
+                vec_err.insert(index, Box::new(e));
+            }
+        }
+
+        if vec_err.is_empty() {
+            Ok(())
+        } else {
+            let err_kind = ValidationErrorsKind::List(vec_err);
+            let errors =
+                ValidationErrors(HashMap::from([(Cow::Borrowed("_tmp_validator"), err_kind)]));
+            Err(errors)
+        }
+    }
+}
+
+impl<K, V: Validate> Validate for &BTreeMap<K, V> {
+    fn validate(&self) -> Result<(), ValidationErrors> {
+        let mut vec_err: BTreeMap<usize, Box<ValidationErrors>> = BTreeMap::new();
+
+        for (index, (_key, value)) in self.iter().enumerate() {
+            if let Err(e) = value.validate() {
+                vec_err.insert(index, Box::new(e));
+            }
+        }
+
+        if vec_err.is_empty() {
+            Ok(())
+        } else {
+            let err_kind = ValidationErrorsKind::List(vec_err);
+            let errors =
+                ValidationErrors(HashMap::from([(Cow::Borrowed("_tmp_validator"), err_kind)]));
+            Err(errors)
+        }
     }
 }
 
@@ -189,6 +123,20 @@ impl<T: Validate> Validate for &T {
 /// The `Args` type can use the lifetime `'v_a` to pass references onto the validator.
 pub trait ValidateArgs<'v_a> {
     type Args;
+    fn validate_with_args(&self, args: Self::Args) -> Result<(), ValidationErrors>;
+}
 
-    fn validate_args(&self, args: Self::Args) -> Result<(), ValidationErrors>;
+impl<'v_a, T, U> ValidateArgs<'v_a> for Option<T>
+where
+    T: ValidateArgs<'v_a, Args = U>,
+{
+    type Args = U;
+
+    fn validate_with_args(&self, args: Self::Args) -> Result<(), ValidationErrors> {
+        if let Some(nested) = self {
+            T::validate_with_args(nested, args)
+        } else {
+            Ok(())
+        }
+    }
 }

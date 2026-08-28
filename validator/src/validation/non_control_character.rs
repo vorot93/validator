@@ -1,19 +1,21 @@
-use std::borrow::Cow;
-use unic_ucd_common::control;
+pub trait ValidateNonControlCharacter {
+    fn validate_non_control_character(&self) -> bool {
+        self.as_non_control_character_iterator().all(|code| !code.is_control())
+    }
 
-#[must_use]
-pub fn validate_non_control_character<'a, T>(alphabetic: T) -> bool
-where
-    T: Into<Cow<'a, str>> + Clone,
-{
-    alphabetic.into().chars().all(|code| !control::is_control(code))
+    fn as_non_control_character_iterator(&self) -> Box<dyn Iterator<Item = char> + '_>;
+}
+
+impl<T: AsRef<str>> ValidateNonControlCharacter for T {
+    fn as_non_control_character_iterator(&self) -> Box<dyn Iterator<Item = char> + '_> {
+        Box::new(self.as_ref().chars())
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::ValidateNonControlCharacter;
     use std::borrow::Cow;
-
-    use super::validate_non_control_character;
 
     #[test]
     fn test_non_control_character() {
@@ -29,19 +31,19 @@ mod tests {
         ];
 
         for (input, expected) in tests {
-            assert_eq!(validate_non_control_character(input), expected);
+            assert_eq!(input.validate_non_control_character(), expected);
         }
     }
 
     #[test]
     fn test_non_control_character_cow() {
         let test: Cow<'static, str> = "आकाश".into();
-        assert_eq!(validate_non_control_character(test), true);
+        assert!(test.validate_non_control_character());
         let test: Cow<'static, str> = String::from("வானத்தில்").into();
-        assert_eq!(validate_non_control_character(test), true);
+        assert!(test.validate_non_control_character());
         let test: Cow<'static, str> = "\u{000c}".into();
-        assert_eq!(validate_non_control_character(test), false);
+        assert!(!test.validate_non_control_character());
         let test: Cow<'static, str> = String::from("\u{009F}").into();
-        assert_eq!(validate_non_control_character(test), false);
+        assert!(!test.validate_non_control_character());
     }
 }
